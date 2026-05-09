@@ -1,0 +1,72 @@
+{
+  "name": "labelpro-bridge",
+  "version": "1.0.1",
+  "description": "Industrial Vector RIP Engine for LabelPro",
+  "main": "index.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win --x64"
+  },
+  "build": {
+    "appId": "com.labelpro.bridge",
+    "productName": "LabelPro Bridge",
+    "copyright": "Copyright © 2026 LabelPro",
+    "directories": {
+      "output": "dist"
+    },
+    "protocols": [
+      {
+        "name": "LabelPro Protocol",
+        "schemes": [
+          "labelpro"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "msi"
+      ],
+      "icon": "icon.png",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "runAfterFinish": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "LabelPro Bridge"
+    }
+  },
+  "keywords": [
+    "printing",
+    "label-printer",
+    "vector-graphics",
+    "thermal-printer",
+    "bridge",
+    "electron-app"
+  ],
+  "author": "LabelPro <info@barcodecanvas.com> (https://barcodecanvas.com)",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.105.1",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "fabric": "^5.3.0",
+    "pdf-to-printer": "^5.8.0",
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "electron": "^30.0.0",
+    "electron-builder": "^26.8.1"
+  },
+  "files": [
+    "**/*",
+    "!dist/*",
+    "!node_modules/electron/*",
+    "!node_modules/electron-builder/*"
+  ]
+}
