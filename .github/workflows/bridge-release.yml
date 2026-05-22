@@ -1,0 +1,126 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# LabelPro Bridge — Cross-Platform Release Builder
+#
+# Triggers on any tag pushed as  bridge-v*  (e.g. bridge-v1.0.2)
+#
+# Two parallel jobs:
+#   build-windows  → windows-latest  → .exe (NSIS) + .msi
+#   build-mac      → macos-latest    → .dmg + .pkg  (x64 & arm64)
+#
+# Both jobs upload their artifacts directly into the GitHub Release that is
+# created automatically by softprops/action-gh-release.
+#
+# ── Code-signing (macOS, optional) ───────────────────────────────────────────
+# Without secrets the Mac build is UNSIGNED.  Users can still install by
+# right-clicking the .dmg and choosing Open, but they will see a Gatekeeper
+# warning.  To produce a clean notarised build add these repo secrets:
+#
+#   CSC_LINK                     base64-encoded Developer ID Application .p12
+#                                Generate: base64 -i cert.p12 | pbcopy
+#   CSC_KEY_PASSWORD             password you set when exporting the .p12
+#   APPLE_ID                     your Apple ID e-mail (for notarisation)
+#   APPLE_APP_SPECIFIC_PASSWORD  app-specific password from appleid.apple.com
+#   APPLE_TEAM_ID                10-character Team ID from developer.apple.com
+#
+# Add secrets at: Settings → Secrets and variables → Actions → New repository secret
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Build & Release Bridge
+
+on:
+  push:
+    tags:
+      - 'bridge-v*'
+
+permissions:
+  contents: write   # required to create/update the GitHub Release
+
+jobs:
+  # ── Windows ────────────────────────────────────────────────────────────────
+  build-windows:
+    name: Windows (.exe + .msi)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows installers
+        run: npx electron-builder --win --x64
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.exe
+            dist/*.msi
+          fail_on_unmatched_files: true
+
+  # ── macOS ──────────────────────────────────────────────────────────────────
+  build-mac:
+    name: macOS (.dmg + .pkg — x64 & arm64)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # icon.icns is required by electron-builder but not committed to the repo.
+      # Generate it on-the-fly from icon.png using sips + iconutil (built into
+      # every macOS runner).
+      - name: Generate icon.icns from icon.png
+        run: |
+          mkdir -p Icon.iconset
+          sips -z 16   16   icon.png --out Icon.iconset/icon_16x16.png
+          sips -z 32   32   icon.png --out Icon.iconset/icon_16x16@2x.png
+          sips -z 32   32   icon.png --out Icon.iconset/icon_32x32.png
+          sips -z 64   64   icon.png --out Icon.iconset/icon_32x32@2x.png
+          sips -z 128  128  icon.png --out Icon.iconset/icon_128x128.png
+          sips -z 256  256  icon.png --out Icon.iconset/icon_128x128@2x.png
+          sips -z 256  256  icon.png --out Icon.iconset/icon_256x256.png
+          sips -z 512  512  icon.png --out Icon.iconset/icon_256x256@2x.png
+          sips -z 512  512  icon.png --out Icon.iconset/icon_512x512.png
+          sips -z 1024 1024 icon.png --out Icon.iconset/icon_512x512@2x.png
+          iconutil -c icns Icon.iconset -o icon.icns
+
+      - name: Install dependencies
+        run: npm ci
+
+      # No --arch flag → electron-builder reads mac.target from package.json
+      # which declares both x64 and arm64 for dmg and pkg.
+      - name: Build macOS installers
+        run: npx electron-builder --mac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Disable keychain auto-discovery; signing still works if CSC_LINK is set
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.dmg
+            dist/*.pkg
+          fail_on_unmatched_files: true
