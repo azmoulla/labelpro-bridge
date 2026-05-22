@@ -55,7 +55,7 @@ jobs:
         run: npm ci
 
       - name: Build Windows installers
-        run: npx electron-builder --win --x64
+        run: npx electron-builder --win --x64 --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -106,7 +106,7 @@ jobs:
       # No --arch flag → electron-builder reads mac.target from package.json
       # which declares both x64 and arm64 for dmg and pkg.
       - name: Build macOS installers
-        run: npx electron-builder --mac
+        run: npx electron-builder --mac --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Disable keychain auto-discovery; signing still works if CSC_LINK is set
