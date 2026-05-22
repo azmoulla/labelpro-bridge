@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win --x64"
+    "dist": "electron-builder --win --x64",
+    "dist:mac": "electron-builder --mac --x64",
+    "dist:all": "electron-builder --win --x64 && electron-builder --mac --x64"
   },
   "build": {
     "appId": "com.labelpro.bridge",
@@ -38,6 +40,33 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "LabelPro Bridge"
+    },
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["x64", "arm64"] },
+        { "target": "pkg", "arch": ["x64", "arm64"] }
+      ],
+      "icon": "icon.icns",
+      "category": "public.app-category.utilities",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
+    },
+    "pkg": {
+      "installLocation": "/Applications",
+      "allowAnywhere": false,
+      "allowCurrentUserHome": false,
+      "allowRootDirectory": true,
+      "isRelocatable": false
+    },
+    "dmg": {
+      "title": "LabelPro Bridge",
+      "contents": [
+        { "x": 130, "y": 220 },
+        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+      ]
+    },
+    "electronRebuildConfig": {
+      "skipModules": ["canvas"]
     }
   },
   "keywords": [
