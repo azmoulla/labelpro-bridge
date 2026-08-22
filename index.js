@@ -9,6 +9,7 @@ const { createClient } = require('@supabase/supabase-js');
 const WebSocket = require('ws');
 const Vault = require('./vault'); // Ensure vault.js is in the same folder
 const { exec } = require('child_process');
+const net = require('net');
 
 // 2. Initialize Supabase
 const supabaseUrl = 'https://zzkzdlxhgpjfebsydygv.supabase.co';
@@ -35,6 +36,48 @@ if (!isPrimaryInstance) {
     }
     // --- 🛡️ VIRTUAL PRINTER HELPERS RESTORED ---
 
+
+/**
+ * Sends raw ZPL text to a network printer over TCP — the standard "raw"/
+ * JetDirect printing protocol. Port 9100 is the de facto standard used by
+ * nearly every network-capable thermal/label printer (Zebra included) for
+ * exactly this: no driver, no spooler, just a socket that accepts a stream
+ * of printer-language bytes and prints whatever comes in. The ZPL text
+ * itself is generated browser-side by src/utils/zplGenerator.js (needs
+ * Canvas for image dithering, not readily available in this Electron main
+ * process) — this function's only job is transport, not generation.
+ *
+ * No response is expected from the printer; "success" here just means the
+ * bytes were fully written and the socket closed without erroring. 5s
+ * connect/idle timeout — a network printer that doesn't accept a
+ * connection that fast is almost certainly unreachable or misconfigured,
+ * not just "slow."
+ */
+function sendZPLOverSocket(ip, port, zplText) {
+    return new Promise((resolve, reject) => {
+        const socket = new net.Socket();
+        let settled = false;
+
+        const finish = (err) => {
+            if (settled) return;
+            settled = true;
+            socket.destroy();
+            if (err) reject(err); else resolve();
+        };
+
+        socket.setTimeout(5000);
+        socket.once('timeout', () => finish(new Error(`Connection to ${ip}:${port} timed out after 5s.`)));
+        socket.once('error', (err) => finish(new Error(`Socket error connecting to ${ip}:${port}: ${err.message}`)));
+        socket.once('close', () => finish());
+
+        socket.connect(port, ip, () => {
+            socket.write(zplText, 'utf8', (err) => {
+                if (err) return finish(err);
+                socket.end(); // half-close and wait for 'close'
+            });
+        });
+    });
+}
 
 const validatePrinterName = async (name) => {
     if (!name || typeof name !== 'string') return null;
@@ -197,9 +240,17 @@ server.post('/print-v2h', async (req, res) => {
             const safePrinter = await validatePrinterName(printer);
             if (!safePrinter) return res.status(400).json({ error: 'Printer not found.' });
 
-            const { objects, hardwareDNA, dimensions, batchData } = dna;
-            const offX = (hardwareDNA?.offsetX || 0) * 0.254 * 3.78;
-            const offY = (hardwareDNA?.offsetY || 0) * 0.254 * 3.78;
+            const { objects, hardwareDNA, dimensions, batchData, calibration } = dna;
+            // Stack the user's saved calibration profile (mm) with the auto-probed hardware
+            // margin (0.01mm units -> mm via *0.254), then convert the combined mm offset to px.
+            // Mirrors the additive Layer 1 (calibration) + Layer 2 (hardwareDNA) logic already
+            // used for the Mirror Brain fallback path in App.jsx — previously this Bridge path
+            // only applied hardwareDNA and silently ignored the saved calibration profile.
+            const offXmm = ((hardwareDNA?.offsetX || 0) * 0.254) + (calibration?.offsetXmm || 0);
+            const offYmm = ((hardwareDNA?.offsetY || 0) * 0.254) + (calibration?.offsetYmm || 0);
+            const offX = offXmm * 3.78;
+            const offY = offYmm * 3.78;
+            const labelScale = calibration?.scale ?? 100;
 
             // Resolve physical page size in mm → microns for webContents.print()
             const PAGE_SIZES_MM = { a4: [210, 297], letter: [215.9, 279.4], a5: [148, 210], a3: [297, 420] };
@@ -248,7 +299,7 @@ server.post('/print-v2h', async (req, res) => {
                 });
             });
 
-            ripWorker.webContents.send('execute-rip', { objects, dimensions, offX, offY, jobId, batchData, hardwareDNA });
+            ripWorker.webContents.send('execute-rip', { objects, dimensions, offX, offY, jobId, batchData, hardwareDNA, labelScale });
 
            
         } catch (err) {
@@ -256,6 +307,58 @@ server.post('/print-v2h', async (req, res) => {
             res.status(500).json({ error: "Internal Engine Error: " + err.message });
         }
     });
+    // 5b. DIRECT NETWORK PRINT (ZPL-over-socket, Phase 2 of the direct-network
+    // printing plan). Bypasses the OS print driver entirely — sends raw ZPL
+    // straight to the printer's IP over TCP. Only used when a printer_profiles
+    // row has connection_type='zpl_socket' (see supabase/migrations/
+    // 20260821000000_printer_profiles_connection_type.sql and
+    // 20260822000000_printer_profiles_dpi.sql). Same auth/subscription check
+    // as /print-v2h, duplicated rather than shared since that's the existing
+    // pattern in this file (no shared auth middleware exists yet).
+    server.post('/print-zpl-socket', async (req, res) => {
+        console.log("\n--- 📡 DIRECT NETWORK PRINT: TCP Socket Start ---");
+        const { zpl, printerIp, port, userId } = req.body;
+
+        if (!zpl || typeof zpl !== 'string') {
+            return res.status(400).json({ error: 'Missing or invalid ZPL text.' });
+        }
+        if (!printerIp || typeof printerIp !== 'string') {
+            return res.status(400).json({ error: 'Missing printer IP address.' });
+        }
+
+        try {
+            const identity = Vault.loadIdentity();
+            if (!identity || identity.userId !== userId) {
+                return res.status(403).json({ error: "Bridge/Account mismatch." });
+            }
+
+            const userSupabase = createClient(supabaseUrl, supabaseAnonKey, {
+                global: { headers: { Authorization: `Bearer ${identity.token}` } },
+                realtime: { transport: WebSocket }
+            });
+
+            const { data: profile } = await userSupabase.from('profiles').select('subscription_status').eq('id', userId).maybeSingle();
+            const { data: memberData } = await userSupabase.from('organization_members').select('organizations(subscription_status)').eq('user_id', userId).maybeSingle();
+
+            const authorizedStatuses = ['active', 'trialing', 'past_due', 'gold', 'silver', 'diamond', 'ultimate'];
+            const profileStatus = String(profile?.subscription_status || 'inactive').toLowerCase();
+            const orgStatus = String(memberData?.organizations?.subscription_status || 'inactive').toLowerCase();
+            const isAuthorized = authorizedStatuses.includes(profileStatus) || authorizedStatuses.includes(orgStatus);
+
+            if (!isAuthorized) {
+                return res.status(403).json({ error: "Account inactive." });
+            }
+
+            await sendZPLOverSocket(printerIp, port || 9100, zpl);
+            console.log(`✅ DIRECT NETWORK PRINT: Sent ${zpl.length} bytes to ${printerIp}:${port || 9100}`);
+            res.status(200).json({ success: true });
+
+        } catch (err) {
+            console.error("💥 DIRECT NETWORK PRINT ERROR:", err.message);
+            res.status(500).json({ error: "Socket print failed: " + err.message });
+        }
+    });
+
     // 6. LEGACY PRINT (PDF Fallback)
     server.post('/print', async (req, res) => {
         console.log("--- 🕵️ MOAT INSPECTION START ---");
@@ -517,7 +620,8 @@ const workerHtml = `
         });
 
         ipcRenderer.on('execute-rip', async (event, payload) => {
-            let { objects, dimensions, offX, offY, jobId, batchData } = payload;
+            let { objects, dimensions, offX, offY, jobId, batchData, labelScale } = payload;
+            const slotScale = (labelScale ?? 100) / 100;
             try {
                 if (typeof objects === 'string') objects = JSON.parse(objects);
                 if (objects && objects.objects) objects = objects.objects;
@@ -658,8 +762,11 @@ const workerHtml = `
                         slotDiv.className    = 'rip-slot';
                         slotDiv.style.left   = xMm + 'mm';
                         slotDiv.style.top    = yMm + 'mm';
-                        slotDiv.style.width  = labelWmm + 'mm';
-                        slotDiv.style.height = labelHmm + 'mm';
+                        // Only the printed content size is scaled, not the grid pitch (xMm/yMm
+                        // above use unscaled labelWmm/labelHmm) — matches mirror_brain.html so
+                        // both print paths apply calibration scale identically.
+                        slotDiv.style.width  = (labelWmm * slotScale) + 'mm';
+                        slotDiv.style.height = (labelHmm * slotScale) + 'mm';
                         slotDiv.innerHTML    = svgString;
 
                         // Override the SVG's pixel width/height so CSS controls the size
