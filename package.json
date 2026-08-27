@@ -1,18 +1,19 @@
 {
   "name": "labelpro-bridge",
-  "version": "1.0.1",
+  "version": "1.0.7",
   "description": "Industrial Vector RIP Engine for LabelPro",
   "main": "index.js",
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --win --x64",
+    "dist:appx": "electron-builder --win appx --x64",
     "dist:mac": "electron-builder --mac --x64",
     "dist:all": "electron-builder --win --x64 && electron-builder --mac --x64"
   },
   "build": {
     "appId": "com.labelpro.bridge",
     "productName": "LabelPro Bridge",
-    "copyright": "Copyright © 2026 LabelPro",
+    "copyright": "Copyright \u00a9 2026 LabelPro",
     "directories": {
       "output": "dist"
     },
@@ -32,6 +33,14 @@
       "icon": "icon.png",
       "requestedExecutionLevel": "asInvoker"
     },
+    "appx": {
+      "identityName": "REPLACE_WITH_PACKAGE_IDENTITY_NAME",
+      "publisher": "CN=REPLACE_WITH_PACKAGE_IDENTITY_PUBLISHER",
+      "publisherDisplayName": "REPLACE_WITH_PUBLISHER_DISPLAY_NAME",
+      "applicationId": "LabelProBridge",
+      "displayName": "LabelPro Bridge",
+      "backgroundColor": "#14181A"
+    },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
@@ -43,8 +52,20 @@
     },
     "mac": {
       "target": [
-        { "target": "dmg", "arch": ["x64", "arm64"] },
-        { "target": "pkg", "arch": ["x64", "arm64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "pkg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
       "icon": "icon.icns",
       "category": "public.app-category.utilities",
@@ -61,8 +82,16 @@
     "dmg": {
       "title": "LabelPro Bridge",
       "contents": [
-        { "x": 130, "y": 220 },
-        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
       ]
     },
     "npmRebuild": false
