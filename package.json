@@ -34,9 +34,9 @@
       "requestedExecutionLevel": "asInvoker"
     },
     "appx": {
-      "identityName": "REPLACE_WITH_PACKAGE_IDENTITY_NAME",
-      "publisher": "CN=REPLACE_WITH_PACKAGE_IDENTITY_PUBLISHER",
-      "publisherDisplayName": "REPLACE_WITH_PUBLISHER_DISPLAY_NAME",
+      "identityName": "Label-Pro.LabelProBridge",
+      "publisher": "CN=64FD190E-455B-42EA-A422-37DC67200197",
+      "publisherDisplayName": "Label-Pro",
       "applicationId": "LabelProBridge",
       "displayName": "LabelPro Bridge",
       "backgroundColor": "#14181A"
