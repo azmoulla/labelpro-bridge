@@ -70,7 +70,12 @@
       "icon": "icon.icns",
       "category": "public.app-category.utilities",
       "hardenedRuntime": true,
-      "gatekeeperAssess": false
+      "gatekeeperAssess": false,
+      "extendInfo": {
+        "NSLocalNetworkUsageDescription": "LabelPro Bridge connects to label printers on your local network to send print jobs directly, without using your system's print dialog."
+      },
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "pkg": {
       "installLocation": "/Applications",
