@@ -253,7 +253,7 @@ server.post('/print-v2h', async (req, res) => {
             const labelScale = calibration?.scale ?? 100;
 
             // Resolve physical page size in mm → microns for webContents.print()
-            const PAGE_SIZES_MM = { a4: [210, 297], letter: [215.9, 279.4], a5: [148, 210], a3: [297, 420] };
+            const PAGE_SIZES_MM = { a4: [210, 297], letter: [215.9, 279.4], a5: [148, 210], a3: [297, 420], tabloid: [279.4, 431.8] };
             let pgW, pgH;
             if (Array.isArray(dimensions.pageFormat)) {
                 [pgW, pgH] = dimensions.pageFormat;
@@ -564,7 +564,7 @@ const workerHtml = `
     <script>
         const { ipcRenderer } = require('electron');
 
-        const PAGE_SIZES_MM = { a4:[210,297], letter:[215.9,279.4], a5:[148,210], a3:[297,420] };
+        const PAGE_SIZES_MM = { a4:[210,297], letter:[215.9,279.4], a5:[148,210], a3:[297,420], tabloid:[279.4,431.8] };
         // fabric.js object coordinates are in screen pixels (96 DPI = 3.78 px/mm)
         const SCREEN_PX = 96 / 25.4;
 
