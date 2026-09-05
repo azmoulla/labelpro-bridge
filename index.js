@@ -575,6 +575,26 @@ const workerHtml = `
 
         document.fonts.load('16px "Alex Brush"').then(() => console.log("RIP: Fonts Primed"));
 
+        // [BARCODE FIX] Local copies of the strip-only value normalizer + invalid-barcode SVG
+        // builder used across the app's other rendering paths (src/utils/barcodeValidation.js
+        // in label-maker-pro) — duplicated here because this worker HTML is a plain <script>,
+        // not an ES module, and can't import from src/. EAN13/EAN8/UPC are strict numeric
+        // formats that JsBarcode validates via its own "valid" callback (never pads/guesses
+        // digits — a value still invalid after stripping formatting noise renders a visible
+        // error box instead of silently vanishing, which used to leave a stale/wrong barcode
+        // printed on the card).
+        const STRICT_NUMERIC_BARCODE_FORMATS_RIP = new Set(['EAN13', 'EAN8', 'UPC']);
+        const normalizeBarcodeValueRip = (value, format) => {
+            const raw = value === null || value === undefined ? '' : String(value);
+            if (!STRICT_NUMERIC_BARCODE_FORMATS_RIP.has(format)) return raw;
+            return raw.replace(/[^0-9]/g, '');
+        };
+        const invalidBarcodeSVGRip = (format) => ({
+            viewBox: '0 0 200 60',
+            inner: '<rect x="1" y="1" width="198" height="58" fill="#fff0f0" stroke="#cc0000" stroke-width="3" stroke-dasharray="6,4"/>' +
+                   '<text x="100" y="34" font-family="Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#cc0000" text-anchor="middle">INVALID ' + (format || 'BARCODE') + '</text>'
+        });
+
         // Re-render a barcode value to a PNG data URL using JsBarcode.
         // Called whenever a variable barcode's text changes so the src updates.
         const renderBarcodeSVG = (value, type) => {
@@ -587,31 +607,37 @@ const workerHtml = `
                 else if (safeType.includes('UPC'))   format = 'UPC';
                 else if (safeType.includes('ITF'))   format = 'ITF14';
                 else if (safeType.includes('CODE39')) format = 'CODE39';
-                
+
+                const renderValue = normalizeBarcodeValueRip(value, format);
+                let isValid = true;
+
                 const svgNode = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-                JsBarcode(svgNode, String(value), {
-                    format: format, 
-                    width: 2, 
+                JsBarcode(svgNode, renderValue, {
+                    format: format,
+                    width: 2,
                     height: 40,        // Bar height
                     displayValue: true, // Show numbers
                     margin: 0,         // FIX: No margin prevents shrinking
-                    fontSize: 18       // Large font for readability
+                    fontSize: 18,      // Large font for readability
+                    valid: (v) => { isValid = v; }
                 });
-                
+
+                if (!isValid) return invalidBarcodeSVGRip(format);
+
                 // Capture the actual dimensions JsBarcode generated
                 const bw = svgNode.getAttribute('width') || "150";
                 const bh = svgNode.getAttribute('height') || "70";
-                
+
                 // Manual concatenation avoids backtick nesting crashes
                 const safeViewBox = svgNode.getAttribute('viewBox') || ("0 0 " + bw + " " + bh);
-                
+
                 return {
                     viewBox: safeViewBox,
                     inner: svgNode.innerHTML
                 };
             } catch (e) {
                 console.warn('Barcode render failed: ' + e.message);
-                return null;
+                return invalidBarcodeSVGRip((type || 'BARCODE').toString().toUpperCase());
             }
         };
 
