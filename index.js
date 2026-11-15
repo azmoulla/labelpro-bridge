@@ -509,7 +509,11 @@ ripWorker = new BrowserWindow({
     webPreferences: {
         nodeIntegration: true,
         contextIsolation: false,
-        backgroundThrottling: false
+        backgroundThrottling: false,
+        // [PRINT PARITY] Barcode digits are drawn as generic "monospace" text. Electron's default monospace is
+        // Courier New (thin, with serifs) while Chrome on Windows uses Consolas, so Direct Print digits came out
+        // thinner than on the canvas and in the PDF route. Match Chrome. Windows only: Consolas is not on macOS.
+        ...(process.platform === 'win32' ? { defaultFontFamily: { monospace: 'Consolas' } } : {})
     }
 });
 
@@ -597,7 +601,7 @@ const workerHtml = `
 
         // Re-render a barcode value to a PNG data URL using JsBarcode.
         // Called whenever a variable barcode's text changes so the src updates.
-        const renderBarcodeSVG = (value, type) => {
+        const renderBarcodeSVG = (value, type, showText) => {
             try {
                 if (!value) return null;
                 const safeType = (type || 'code128').toUpperCase();
@@ -615,10 +619,13 @@ const workerHtml = `
                 JsBarcode(svgNode, renderValue, {
                     format: format,
                     width: 2,
-                    height: 40,        // Bar height
-                    displayValue: true, // Show numbers
+                    // [PRINT PARITY] Same bar height / digit size / show-text handling as the app canvas
+                    // (App.jsx) and the browser print path (public/mirror_brain.html). The old 40 / 18 / always-on
+                    // values were stretched into the app's taller barcode box, distorting the digits.
+                    height: 60,        // Bar height
+                    displayValue: showText !== false, // Respect the "Show text" setting
                     margin: 0,         // FIX: No margin prevents shrinking
-                    fontSize: 18,      // Large font for readability
+                    fontSize: 20,      // Digit size
                     valid: (v) => { isValid = v; }
                 });
 
@@ -737,7 +744,20 @@ const workerHtml = `
                         await new Promise(resolve => {
                             lc.clear();
                             lc.loadFromJSON({ objects: fabricObjs }, () => {
-                                lc.getObjects().forEach(o => { if (o.type && o.type.includes('text')) o.initDimensions(); });
+                                lc.getObjects().forEach(o => {
+                                    if (!o.type || !o.type.includes('text')) return;
+                                    o.initDimensions();
+                                    // [PRINT PARITY] Same shrink-to-fit as the browser renderer
+                                    // (mirror_brain.html): if text spills past the label edge,
+                                    // reduce the font a point at a time (min 6pt) until it fits.
+                                    let bail = 0;
+                                    while ((o.width > (labelWpx + 2) || (o.top + o.height) > (labelHpx + 2)) && o.fontSize > 6 && bail < 20) {
+                                        o.set('fontSize', o.fontSize - 1);
+                                        o.initDimensions();
+                                        o.setCoords();
+                                        bail++;
+                                    }
+                                });
                                 lc.renderAll();
                                 resolve();
                             });
@@ -753,7 +773,7 @@ const workerHtml = `
                       // FIX 2: Use "overflow=visible" to ensure numbers aren't clipped
                         for (const bc of varBarcodes) {
                             try {
-                                const svgData = renderBarcodeSVG(bc.text, bc.barcodeType);
+                                const svgData = renderBarcodeSVG(bc.text, bc.barcodeType, bc.barcodeShowText);
                                 if (svgData) {
                                     const sX = bc.scaleX || 1, sY = bc.scaleY || 1;
                                     const objW = (bc.width  || 100) * sX;
@@ -800,6 +820,12 @@ const workerHtml = `
                         if (svgEl) {
                             svgEl.setAttribute('width',  '100%');
                             svgEl.setAttribute('height', '100%');
+                            // Label canvas size is rounded up to whole px, so the viewBox can differ in shape from the mm slot;
+                            // default 'meet' then shrinks the label ~0.7%. Stretch to the slot instead (matches mirror_brain.html).
+                            svgEl.setAttribute('preserveAspectRatio', 'none');
+                            // The design is laid out at 3.78 px/mm but the canvas above is rounded UP to whole px (e.g. 241 for 240.03).
+                            // Use the exact size as the viewBox so 63.5mm of design fills exactly the 63.5mm slot (no ~0.4% shrink).
+                            svgEl.setAttribute('viewBox', '0 0 ' + (labelWmm * 3.78) + ' ' + (labelHmm * 3.78));
                         }
 
                         pageDiv.appendChild(slotDiv);
