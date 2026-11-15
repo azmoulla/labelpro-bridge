@@ -509,7 +509,11 @@ ripWorker = new BrowserWindow({
     webPreferences: {
         nodeIntegration: true,
         contextIsolation: false,
-        backgroundThrottling: false
+        backgroundThrottling: false,
+        // [PRINT PARITY] Barcode digits are drawn as generic "monospace" text. Electron's default monospace is
+        // Courier New (thin, with serifs) while Chrome on Windows uses Consolas, so Direct Print digits came out
+        // thinner than on the canvas and in the PDF route. Match Chrome. Windows only: Consolas is not on macOS.
+        ...(process.platform === 'win32' ? { defaultFontFamily: { monospace: 'Consolas' } } : {})
     }
 });
 
